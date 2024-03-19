@@ -50,7 +50,7 @@ class SampleEngine:
         """Declares global variables.
         During testing, we found the garbage collector would slow down sampling enough to cause a
         lot of dropped samples.
-        We've tried to combat this by allocating as much as possible in advance."""
+        We've tried to combat this by allocating as much as possible in advance."""        
         self.monsoon = Monsoon
         self.__errorMode = errorMode
         if(errorMode == ErrorHandlingModes.debug):
@@ -70,6 +70,8 @@ class SampleEngine:
         self.bulkProcessRate = 128
         self.__packetSize = 64
         self.__startTime = time.time()
+        self.__errorState = False #New variable
+
         #Indices
         self.__mainCoarseIndex = 0
         self.__mainFineIndex = 1
@@ -391,9 +393,12 @@ class SampleEngine:
         """Separates received packets into ZeroCal, RefCal, and measurement samples.
         measurements:  an nxm array of swizzled packets from the Power Monitor """
         Samples = []
+        error_flag = 0x10 #New: Hex value to use for bitwise comparison
         for measurement in measurements:
             self.dropped = measurement[0]
             flags = measurement[1]
+            if (flags & error_flag): #New: bitwise check to see if unit is in an error state
+                self.__errorState = True #New: flip to true so we can break the sample loop
             numObs = measurement[2]
             offset = 3
             for _ in range(0,numObs):
@@ -424,6 +429,9 @@ class SampleEngine:
             return False
         if not self.__channels[self.__triggerChannel]:
             print("Error:  Trigger channel not enabled.")
+            return False
+        if self.__errorState: #New: unit should not be allowed to start sampling while in an error state
+            print("Power Monitor is in an error state, reset Vout")
             return False
         return True
 
@@ -589,6 +597,9 @@ class SampleEngine:
                 csvOutRateLimit = False
             if(S == 0):
                 Samples = [[0 for _ in range(self.__packetSize+1)] for _ in range(self.bulkProcessRate)]
+            if (self.__errorState): #New: if error state has been triggered break out of the sample loop and alert the user
+                print("An overcurrent or other error has occured, reset VOut and restart sample run")
+                break
         self.monsoon.stopSampling()
         if(self.__CSVOutEnable):
             self.__outputToCSV()
